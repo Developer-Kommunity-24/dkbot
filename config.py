@@ -1,36 +1,45 @@
 import os
+import sys
 from dotenv import load_dotenv
+import logging
 
 load_dotenv()
 
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+def get_env(key, default=None, required=False):
+    value = os.getenv(key, default)
+    if required and not value:
+        logging.critical(f"FATAL: Missing required environment variable: {key}")
+        sys.exit(1)
+    return value
+
 # --- Discord Bot ---
-TOKEN = os.getenv("TOKEN")
-ADMIN_CHANNEL_ID = 1406306662826119449
-GUILD_ID = 1304508522305683496
+TOKEN = get_env("TOKEN", required=True)
+ADMIN_CHANNEL_ID = int(get_env("ADMIN_CHANNEL_ID", 1406306662826119449)) # Default provided in original code
+GUILD_ID = int(get_env("GUILD_ID", 1304508522305683496)) # Default provided in original code
 
 # --- Webhook ---
-WEBHOOK_SECRET_KEY = os.getenv("WEBHOOK_SECRET_KEY", "default-secret-key-please-change")
-WEB_SERVER_PORT = int(os.getenv("PORT", 8080))
+WEBHOOK_SECRET_KEY = get_env("WEBHOOK_SECRET_KEY", "default-secret-key-please-change")
+WEB_SERVER_PORT = int(get_env("PORT", 8080))
 
-# --- Google Sheets ---
-SHEETS_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
-GOOGLE_SHEET_URL = os.getenv("GOOGLE_SHEET_CSV_URL")
-GOOGLE_SERVICE_ACCOUNT_EMAIL = os.getenv("GOOGLE_SERVICE_ACCOUNT_EMAIL")
-GOOGLE_PRIVATE_KEY = os.getenv("GOOGLE_PRIVATE_KEY")
+# --- Database ---
+DATABASE_URL = get_env("DATABASE_URL", required=True)
 
 # --- Gmail API ---
 GMAIL_SCOPES = ['https://www.googleapis.com/auth/gmail.send']
 # Path inside the project directory to store the generated token.pickle
 GMAIL_TOKEN_PICKLE_PATH = 'key/token.pickle'
 # Base64 encoded token for initial setup, loaded from env
-GMAIL_API_TOKEN_BASE64 = os.getenv("GMAIL_API_TOKEN_BASE64")
+GMAIL_API_TOKEN_BASE64 = get_env("GMAIL_API_TOKEN_BASE64")
 SENDER_EMAIL = "me" # Uses the authenticated user's email
 
 # --- Invite Content ---
-WHATSAPP_URL = os.getenv("WHATSAPP_URL")
+WHATSAPP_URL = get_env("WHATSAPP_URL", "#")
 CLUSTER_INVITE_URL = "https://discord.gg/g2MHZGpdrc"
 # Role to be assigned upon successful /verify
-VERIFY_ROLE_ID = "1350132344417157140"
+VERIFY_ROLE_ID = int(get_env("VERIFY_ROLE_ID", 1350132344417157140))
 
 # --- Column Names ---
 COL_EMAIL = "email"

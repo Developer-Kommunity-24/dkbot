@@ -1,5 +1,5 @@
 .env
-.venv/
+venv/
 credentials.json
 token.pickle
 __pycache__

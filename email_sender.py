@@ -2,7 +2,9 @@ import base64
 import pickle
 import os
 import sys
+import asyncio
 from email.mime.text import MIMEText
+from functools import partial
 
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
@@ -65,11 +67,8 @@ def _create_message(sender, to, subject, message_text):
     message['subject'] = subject
     return {'raw': base64.urlsafe_b64encode(message.as_bytes()).decode()}
 
-def send_invite_email(recipient_email: str, name: str) -> bool:
-    """
-    Sends a pre-formatted invitation email.
-    Returns True on success, False on failure.
-    """
+def _send_email_sync(recipient_email: str, name: str) -> bool:
+    """Internal synchronous function to send email."""
     service = get_gmail_service()
     if not service:
         logging.error("Could not get Gmail service. Email not sent.")
@@ -129,3 +128,11 @@ def send_invite_email(recipient_email: str, name: str) -> bool:
     except Exception as e:
         logging.error(f"❌ Failed to send email to {recipient_email}: {e}")
         return False
+
+async def send_invite_email(recipient_email: str, name: str) -> bool:
+    """
+    Sends a pre-formatted invitation email asynchronously.
+    Returns True on success, False on failure.
+    """
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, partial(_send_email_sync, recipient_email, name))

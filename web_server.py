@@ -26,11 +26,15 @@ async def handle_new_applicant_webhook(request):
             logging.error("Webhook data is missing required fields (email, firstName).")
             return web.Response(status=400, text="Bad Request: Missing required fields.")
 
-        # Add to Google Sheet
-        sheets_client.add_individual_applicant(data)
+        # Add to Google Sheet (Async)
+        await sheets_client.async_add_individual_applicant(data)
 
-        # Pass the data to the bot to handle the Discord message
-        await bot.post_approval_card(data)
+        # Pass the data to the Cog to handle the Discord message
+        cog = bot.get_cog('Applications')
+        if cog:
+            await cog.post_approval_card(data)
+        else:
+            logging.error("Applications Cog not found!")
 
         return web.Response(status=200, text="OK")
 
@@ -55,11 +59,15 @@ async def handle_new_college_applicant_webhook(request):
         bot = request.app['bot']
         sheets_client = request.app['sheets_client']
 
-        # Add to Google Sheet
-        sheets_client.add_college_applicant(data)
+        # Add to Google Sheet (Async)
+        await sheets_client.async_add_college_applicant(data)
         
-        # Pass the data to the bot to handle the Discord message
-        await bot.post_college_applicant_card(data)
+        # Pass the data to the Cog to handle the Discord message
+        cog = bot.get_cog('Applications')
+        if cog:
+            await cog.post_college_applicant_card(data)
+        else:
+            logging.error("Applications Cog not found!")
 
         return web.Response(status=200, text="OK")
 
@@ -82,12 +90,17 @@ async def handle_new_event_webhook(request):
         bot = request.app['bot']
         sheets_client = request.app['sheets_client']
 
-        # Add to Google Sheet and get the unique ID
-        event_id = sheets_client.add_event_submission(data)
+        # Add to Google Sheet and get the unique ID (Async)
+        event_id = await sheets_client.async_add_event_submission(data)
 
         if event_id:
-            # Pass the data and ID to the bot to handle the Discord message
-            await bot.post_event_approval_card(data, event_id)
+            # Pass the data and ID to the Cog to handle the Discord message
+            cog = bot.get_cog('Events')
+            if cog:
+                await cog.post_event_approval_card(data, event_id)
+            else:
+                logging.error("Events Cog not found!")
+                
             return web.Response(status=200, text="OK")
         else:
             return web.Response(status=500, text="Internal Server Error: Failed to add event to sheet.")
