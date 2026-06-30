@@ -2,6 +2,19 @@ from aiohttp import web
 import logging
 import config
 
+async def handle_get_approved_events(request):
+    """Returns approved events for public calendar consumption."""
+    try:
+        sheets_client = request.app['sheets_client']
+        events = await sheets_client.async_get_approved_events()
+        return web.json_response({'events': events, 'count': len(events)})
+    except Exception as e:
+        logging.error(f"Error fetching approved events: {e}")
+        return web.json_response(
+            {'error': 'Failed to fetch approved events'},
+            status=500,
+        )
+
 async def handle_new_applicant_webhook(request):
     """Handles incoming webhooks with new applicant data."""
     # Verify the secret key
@@ -114,6 +127,7 @@ async def start_web_server(bot, sheets_client):
     app = web.Application()
     app['bot'] = bot  # Make the bot instance available to request handlers
     app['sheets_client'] = sheets_client # Make the sheets_client instance available
+    app.router.add_get('/api/events', handle_get_approved_events)
     app.router.add_post('/api/new-applicant', handle_new_applicant_webhook)
     app.router.add_post('/api/new-college-applicant', handle_new_college_applicant_webhook)
     app.router.add_post('/api/new-event', handle_new_event_webhook)
@@ -127,4 +141,3 @@ async def start_web_server(bot, sheets_client):
         logging.info(f"✅ Web server started on port {config.WEB_SERVER_PORT}")
     except Exception as e:
         logging.error(f"❌ Failed to start web server: {e}")
-
