@@ -7,12 +7,58 @@ import config
 import string
 import random
 import asyncio
+from datetime import datetime
 from urllib.parse import urlparse, unquote
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def generate_random_id(length=6):
     return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
+
+def _parse_tags(raw_tags):
+    if isinstance(raw_tags, list):
+        return [str(tag).strip() for tag in raw_tags if str(tag).strip()]
+    if isinstance(raw_tags, str):
+        return [tag.strip() for tag in raw_tags.split(',') if tag.strip()]
+    return []
+
+def _to_public_event(row):
+    if not row:
+        return None
+
+    data = row['data']
+    if isinstance(data, str):
+        data = json.loads(data)
+
+    start_date_time = data.get('startDateTime')
+    end_date_time = data.get('endDateTime')
+    organization_name = data.get('organizationName', '')
+    is_dk24 = organization_name == 'DK24'
+
+    try:
+        start_dt = datetime.fromisoformat(start_date_time)
+        end_dt = datetime.fromisoformat(end_date_time)
+    except (TypeError, ValueError):
+        return None
+
+    return {
+        'id': row['id'],
+        'title': data.get('eventName', ''),
+        'startDateTime': start_dt.isoformat(),
+        'endDateTime': end_dt.isoformat(),
+        'time': start_dt.strftime('%H:%M'),
+        'location': data.get('eventLocation', ''),
+        'description': data.get('eventDescription', ''),
+        'registrationLink': data.get('registrationLink', '') or '',
+        'joinLink': data.get('eventWebsite', '') or '',
+        'icon': 'calendar',
+        'highlight': is_dk24,
+        'youtubeLink': '',
+        'color': 'green' if is_dk24 else 'gray',
+        'organizationName': organization_name,
+        'posterUrl': data.get('eventPosterUrl', '') or '',
+        'tags': _parse_tags(data.get('eventTags', [])),
+    }
 
 class DatabaseClient:
     def __init__(self):
@@ -184,6 +230,13 @@ class DatabaseClient:
     async def async_revert_rejection(self, event_id: str) -> bool:
         res = await self._execute("UPDATE events SET status = 'pending' WHERE id = %s", event_id)
         return res > 0
+
+    async def async_get_approved_events(self):
+        rows = await self._fetch(
+            "SELECT id, data FROM events WHERE status = 'accepted' ORDER BY data->>'startDateTime' ASC"
+        )
+        events = [_to_public_event(row) for row in rows]
+        return [event for event in events if event is not None]
 
     async def async_get_all_records(self):
         rows = await self._fetch('SELECT * FROM individuals')
