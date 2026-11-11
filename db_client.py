@@ -9,7 +9,8 @@ import random
 import asyncio
 from datetime import datetime
 from urllib.parse import urlparse, unquote
-
+import hashlib
+import secrets
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def generate_random_id(length=6):
@@ -121,6 +122,25 @@ class DatabaseClient:
                         level INTEGER DEFAULT 1,
                         last_message TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
+
+                    CREATE TABLE IF NOT EXISTS email_subscribers (
+    id SERIAL PRIMARY KEY,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    unsubscribed_at TIMESTAMP WITH TIME ZONE,
+    unsubscribe_token_hash VARCHAR(64) UNIQUE
+);
+CREATE TABLE IF NOT EXISTS email_unsubscribe_tokens (
+    id SERIAL PRIMARY KEY,
+    subscriber_id INTEGER NOT NULL REFERENCES email_subscribers(id) ON DELETE CASCADE,
+    token_hash VARCHAR(64) NOT NULL UNIQUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    used_at TIMESTAMP WITH TIME ZONE
+);
+ALTER TABLE email_subscribers
+ADD COLUMN IF NOT EXISTS unsubscribe_token_hash VARCHAR(64) UNIQUE;
                 ''')
                 conn.commit()
         finally:
@@ -137,6 +157,9 @@ class DatabaseClient:
                 cur.execute(query, args)
                 conn.commit()
                 return cur.rowcount
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             self.pool.putconn(conn)
 
@@ -148,7 +171,12 @@ class DatabaseClient:
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(query, args)
-                return cur.fetchall()
+                rows = cur.fetchall()
+                conn.commit()
+                return rows
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             self.pool.putconn(conn)
 
@@ -160,7 +188,12 @@ class DatabaseClient:
         try:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(query, args)
-                return cur.fetchone()
+                row = cur.fetchone()
+                conn.commit()
+                return row
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             self.pool.putconn(conn)
 
@@ -173,7 +206,11 @@ class DatabaseClient:
             with conn.cursor() as cur:
                 cur.execute(query, args)
                 row = cur.fetchone()
+                conn.commit()
                 return row[0] if row else None
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             self.pool.putconn(conn)
 
@@ -267,6 +304,151 @@ class DatabaseClient:
         )
         return res > 0
 
+    
+    async def async_subscribe_email(self, email: str):
+        email = (email or "").strip().lower()
+
+        existing = await self._fetchrow(
+            """
+            SELECT id, email, is_active
+            FROM email_subscribers
+            WHERE email = %s
+            """,
+            email,
+        )
+
+        if existing and existing["is_active"]:
+            return {
+                **dict(existing),
+                "status": "already_subscribed",
+            }
+
+        row = await self._fetchrow(
+            """
+            INSERT INTO email_subscribers
+                (email, is_active, unsubscribed_at)
+            VALUES (%s, TRUE, NULL)
+            ON CONFLICT (email)
+            DO UPDATE SET
+                is_active = TRUE,
+                unsubscribed_at = NULL
+            RETURNING id, email, is_active
+            """,
+            email,
+        )
+
+        if not row:
+            return None
+
+        return {
+            **dict(row),
+            "status": "subscribed",
+        }
+
+
+    async def async_get_active_email_subscribers(self):
+        return await self._fetch(
+            """
+            SELECT id, email
+            FROM email_subscribers
+            WHERE is_active = TRUE
+            ORDER BY created_at ASC
+            """
+        )
+
+    async def async_get_digest_recipients(self):
+        subscribers = await self.async_get_active_email_subscribers()
+        recipients = []
+
+        for subscriber in subscribers:
+            token = secrets.token_urlsafe(32)
+            token_hash = hashlib.sha256(token.encode()).hexdigest()
+
+            await self._execute(
+                """
+                INSERT INTO email_unsubscribe_tokens
+                    (subscriber_id, token_hash, expires_at)
+                VALUES (
+                    %s,
+                    %s,
+                    CURRENT_TIMESTAMP + INTERVAL '365 days'
+                )
+                """,
+                subscriber["id"],
+                token_hash
+            )
+
+            recipients.append({
+                "email": subscriber["email"],
+                "unsubscribe_token": token
+            })
+
+        return recipients
+
+    async def async_unsubscribe_email(self, token: str):
+        token_hash = hashlib.sha256(token.encode()).hexdigest()
+
+        return await asyncio.to_thread(
+            self._unsubscribe_email_sync,
+            token_hash
+        )
+
+    def _unsubscribe_email_sync(self, token_hash: str):
+        conn = self.pool.getconn()
+
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT t.id, s.id
+                    FROM email_unsubscribe_tokens t
+                    JOIN email_subscribers s
+                        ON s.id = t.subscriber_id
+                    WHERE t.token_hash = %s
+                        AND t.used_at IS NULL
+                        AND t.expires_at > CURRENT_TIMESTAMP
+                        AND s.is_active = TRUE
+                    FOR UPDATE OF t, s
+                    """,
+                    (token_hash,)
+                )
+
+                row = cur.fetchone()
+
+                if not row:
+                    conn.rollback()
+                    return False
+
+                token_id, subscriber_id = row
+
+                cur.execute(
+                    """
+                    UPDATE email_subscribers
+                    SET is_active = FALSE,
+                        unsubscribed_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    """,
+                    (subscriber_id,)
+                )
+
+                cur.execute(
+                    """
+                    UPDATE email_unsubscribe_tokens
+                    SET used_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    """,
+                    (token_id,)
+                )
+
+                conn.commit()
+                return True
+
+        except Exception:
+            conn.rollback()
+            raise
+
+        finally:
+            self.pool.putconn(conn)
     async def async_get_records_by_status(self, status: str):
         rows = await self._fetch('SELECT * FROM individuals WHERE accepted = %s', status)
         return [self._row_to_dict(row) for row in rows]

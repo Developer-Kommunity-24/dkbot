@@ -128,7 +128,43 @@ def _send_email_sync(recipient_email: str, name: str) -> bool:
     except Exception as e:
         logging.error(f"❌ Failed to send email to {recipient_email}: {e}")
         return False
+def _send_html_email_sync(recipient_email: str, subject: str, html_content: str) -> bool:
+    service = get_gmail_service()
 
+    if not service:
+        logging.error("Could not get Gmail service. Email not sent.")
+        return False
+
+    message = _create_message(
+        config.SENDER_EMAIL,
+        recipient_email,
+        subject,
+        html_content
+    )
+
+    try:
+        sent_message = service.users().messages().send(
+            userId=config.SENDER_EMAIL,
+            body=message
+        ).execute()
+
+        logging.info(
+            "Sent digest email to %s, Message ID: %s",
+            recipient_email,
+            sent_message["id"]
+        )
+        return True
+    except Exception:
+        logging.exception("Failed to send digest email to %s", recipient_email)
+        return False
+
+
+async def send_html_email(recipient_email: str, subject: str, html_content: str) -> bool:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None,
+        partial(_send_html_email_sync, recipient_email, subject, html_content)
+    )
 async def send_invite_email(recipient_email: str, name: str) -> bool:
     """
     Sends a pre-formatted invitation email asynchronously.

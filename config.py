@@ -9,8 +9,6 @@ load_dotenv()
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
-
-
 def get_env(key, default=None, required=False):
     value = os.getenv(key, default)
     if required and not value:
@@ -19,8 +17,10 @@ def get_env(key, default=None, required=False):
     return value
 
 
+UNSUBSCRIBE_URL = get_env("UNSUBSCRIBE_URL")
+
 # --- Discord Bot ---
-TOKEN = get_env("TOKEN", required=True)
+TOKEN = get_env("TOKEN")
 ADMIN_CHANNEL_ID = int(
     get_env("ADMIN_CHANNEL_ID", 1406306662826119449)
 )  # Default provided in original code
@@ -29,7 +29,7 @@ GUILD_ID = int(
 )  # Default provided in original code
 
 # --- Webhook ---
-WEBHOOK_SECRET_KEY = get_env("WEBHOOK_SECRET_KEY", "default-secret-key-please-change")
+WEBHOOK_SECRET_KEY = get_env("WEBHOOK_SECRET_KEY", required=True)
 WEB_SERVER_PORT = int(get_env("PORT", 8080))
 
 # --- Database ---
